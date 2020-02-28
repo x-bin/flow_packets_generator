@@ -1,19 +1,28 @@
 import numpy as np
 
 class flow_packets_generator:
-    def __init__(self, flow_nums, min_num, alpha):
-        self.flow_nums = flow_nums
+    def __init__(self, concurrency_flow_nums, pkts_num, min_num, alpha, save_file):
+        self.concurrency_flow_nums = concurrency_flow_nums
+        self.pkts_num = pkts_num
         self.min_num = min_num
         self.alpha = alpha
-        self.flow_distribution = None
+        self.save_file = save_file
+        self.flow_distribution = np.floor((np.random.pareto(self.alpha, size=self.concurrency_flow_nums) + 1) * self.min_num).astype(int)
+        for i in self.flow_distribution:
+            assert(i > 0)
+        self.flow_distribution_record = list(self.flow_distribution)
+        self.flowid_record = []
         self.flowid = []
+        for i in range(self.concurrency_flow_nums):
+            tempid = self.get_rand_flowid()
+            self.flowid.append(tempid)
+            self.flowid_record.append(tempid)
+
         self.pkts_sequence = []
-        self.get_flow_distribution()
         self.get_pkts_sequence()
 
-    def get_flow_distribution(self):
-        self.flow_distribution = np.floor((np.random.pareto(self.alpha, size=self.flow_nums) + 1) * self.min_num).astype(int)
-        sorted_distribution = np.sort(self.flow_distribution)
+    def show_flow_distribution(self):
+        sorted_distribution = np.sort(self.flow_distribution_record)
         flow_dict = dict()
         temp = sorted_distribution[0]
         flow_dict[temp] = 1
@@ -26,32 +35,44 @@ class flow_packets_generator:
         print("生成的流的具体分布为：")
         for key, value in flow_dict.items():
             print(key, value)
-        self.pkts_num = sum(self.flow_distribution)
-        print("总数据包的数量为：", self.pkts_num)
-        print("每个流的平均数据包量为：", self.pkts_num / self.flow_nums)
+        pkts_num = sum(self.flow_distribution_record)
+        print("实际生成的总数据包的数量为：", pkts_num)
+        print("每个流的平均数据包量为：", pkts_num / len(self.flow_distribution_record))
 
     def get_pkts_sequence(self):
-        for i in range(self.flow_nums):
-            self.flowid.append(self.get_rand_flowid())
-            #print(self.flowid[i])
-        pkts_num_now = self.pkts_num
-        flow_distribution_now = self.flow_distribution
-        for i in range(self.pkts_num):
-            assert(pkts_num_now > 0)
-            temp_index = np.random.randint(0, pkts_num_now)
-            add_index = 0
-            stop_index = 0
-            for j in range(self.flow_nums):
-                add_index += flow_distribution_now[j]
-                if add_index > temp_index:
-                    stop_index = j
-                    break
-            pkt = self.flowid[stop_index]
-            print(i, pkt)
-            self.pkts_sequence.append(pkt)
-            pkts_num_now -= 1
-            flow_distribution_now[stop_index] -= 1
+        pkts_num_now = sum(self.flow_distribution)
+        with open(self.save_file,'w') as f:
+            f.write("[")
 
+            for i in range(self.pkts_num):
+                if i % 1000000 == 0:
+                    print("进度报告：", i / self.pkts_num)
+                temp_index = np.random.randint(0, pkts_num_now)
+                add_index = 0
+                stop_index = 0
+                for j in range(self.concurrency_flow_nums):
+                    add_index += self.flow_distribution[j]
+                    if add_index > temp_index:
+                        stop_index = j
+                        break
+                if i != self.pkts_num - 1:
+                    pkt = self.flowid[stop_index] + ","
+                else:
+                    pkt = self.flowid[stop_index]
+                f.write(pkt)
+                self.pkts_sequence.append(pkt)
+                pkts_num_now -= 1
+                self.flow_distribution[stop_index] -= 1
+                if self.flow_distribution[stop_index] == 0:
+                    new_flow_num = (np.floor((np.random.pareto(self.alpha, size=1) + 1) * self.min_num).astype(int))[0]
+                    self.flow_distribution[stop_index] = new_flow_num
+                    new_flow_id = self.get_rand_flowid()
+                    self.flowid[stop_index] = new_flow_id
+                    self.flowid_record.append(new_flow_id)
+                    pkts_num_now += new_flow_num
+            f.write("]")
+            print("最终生成的总流个数：", len(self.flowid_record))
+            print("平均每个流的数据包数量为：", len(self.flowid_record) / self.pkts_num)
 
     def get_rand_flowid(self):
         lst = []
@@ -72,4 +93,7 @@ class flow_packets_generator:
 
 
 if __name__ == "__main__":
-    ge = flow_packets_generator(100, 1, 20/19)
+    for i in range(1, 6):
+        print("第", i, "次 trace 文件开始生成")
+        filename = "trace" + str(i)
+        ge = flow_packets_generator(100000, 20010000, 1, 1 + i * 0.05, filename)
